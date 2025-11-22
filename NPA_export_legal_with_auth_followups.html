@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>NPA Management — Legal Export + Auth + Follow-ups</title>
+<style>
+  :root{ --bg:#f6f8fb; --card:#ffffff; --muted:#6b7280; --accent:#0f6fff; --danger:#ef4444; --success:#10b981; --glass: rgba(15,23,42,0.03); font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:linear-gradient(180deg,#eef4ff 0%,var(--bg) 100%);color:#091024;padding:18px}
+  .app{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:1fr;gap:14px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  h1{margin:0;font-size:20px}
+  .controls{display:flex;gap:8px;align-items:center}
+  .card{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 20px rgba(15,23,42,0.06);border:1px solid var(--glass)}
+  .filters{display:flex;gap:10px;flex-wrap:wrap}
+  input[type=text], input[type=password], select{padding:8px 10px;border-radius:8px;border:1px solid #e6eef6;background:#fbfdff}
+  button{background:var(--accent);color:white;border:0;padding:8px 12px;border-radius:8px;cursor:pointer}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid rgba(15,111,255,0.12)}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th,td{padding:10px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:14px;vertical-align:middle}
+  th{background:transparent;color:var(--muted);font-weight:600}
+  tr:hover td{background:linear-gradient(90deg, rgba(15,111,255,0.03), transparent)}
+  .tag{display:inline-block;padding:6px 8px;border-radius:999px;font-size:12px}
+  .small{font-size:12px;color:var(--muted)}
+  .muted{color:var(--muted);font-size:13px}
+  .spacer{flex:1}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(3,7,18,0.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:9998}
+  .modal{width:920px;max-width:100%;max-height:86vh;overflow:auto;background:var(--card);border-radius:12px;padding:16px;box-shadow:0 8px 30px rgba(2,6,23,0.6);z-index:9999;position:relative}
+  .row{display:flex;gap:8px}
+  .col{flex:1}
+  label{display:block;font-size:13px;margin-bottom:6px;color:var(--muted)}
+  .tiny{font-size:12px;color:var(--muted)}
+  .follow-count{font-size:13px;color:var(--muted);min-width:60px}
+  .small-btn{padding:6px 8px;border-radius:6px;border:1px solid rgba(15,111,255,0.08);background:transparent;color:var(--accent);cursor:pointer;font-size:12px}
+  .follow-item{display:flex;justify-content:space-between;align-items:center;padding:6px;border-radius:6px;background:rgba(15,23,42,0.02);margin-bottom:6px}
+  @media (max-width:900px){ .modal{width:95%} .row{flex-direction:column} }
+</style>
+</head>
+<body>
+
+<!-- Login modal (shown when not authenticated) -->
+<div id="loginBackdrop" class="modal-backdrop" style="display:flex;align-items:center;justify-content:center">
+  <div class="modal card" role="dialog" aria-modal="true">
+    <h3 style="margin-top:0">Sign in</h3>
+    <form id="loginForm">
+      <div style="margin-bottom:8px">
+        <label>Username</label>
+        <input id="loginUser" type="text" autocomplete="username" required />
+      </div>
+      <div style="margin-bottom:8px">
+        <label>Password</label>
+        <input id="loginPass" type="password" autocomplete="current-password" required />
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button type="submit">Sign in</button>
+      </div>
+      <div class="tiny" style="margin-top:8px">Test account: <strong>admin / admin123</strong> (client-side demo only)</div>
+    </form>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="mainApp" class="app" style="display:none">
+
+  <header class="card">
+    <div>
+      <h1>NPA Management — Legal Export + Dashboard</h1>
+      <div class="tiny muted" id="userInfo"></div>
+    </div>
+    <div class="controls nav">
+      <div class="profile small muted" id="profileArea"></div>
+      <button id="logoutBtn" class="ghost" style="background:#ef4444">Logout</button>
+    </div>
+  </header>
+
+  <!-- Dashboard -->
+  <section id="dashboard" class="card">
+    <h2 style="margin:0 0 8px 0;font-size:16px">Dashboard</h2>
+    <div class="row" style="gap:12px">
+      <div class="col card" style="padding:12px">
+        <div class="small muted">Total Outstanding</div>
+        <div id="dashTotal" style="font-weight:700;font-size:18px;margin-top:6px">₹0</div>
+      </div>
+      <div class="col card" style="padding:12px">
+        <div class="small muted">NPA Count</div>
+        <div id="dashNpa" style="font-weight:700;font-size:18px;margin-top:6px">0</div>
+      </div>
+      <div class="col card" style="padding:12px">
+        <div class="small muted">Follow-ups</div>
+        <div id="dashFollow" style="font-weight:700;font-size:18px;margin-top:6px">0</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Controls -->
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0;font-size:16px">Accounts</h2>
+      <div>
+        <button id="addBtn" type="button">+ Add Account</button>
+        <button id="importBtn" class="ghost">Import CSV</button>
+        <button id="exportBtn" class="ghost">Export CSV</button>
+        <button id="resetBtn" class="ghost">Reset Snapshot</button>
+        <input id="fileInput" type="file" accept=".csv" style="display:none" />
+      </div>
+    </div>
+
+    <div style="margin-top:12px" class="filters">
+      <input id="searchBox" type="text" placeholder="Search borrower / account / notes" />
+      <select id="statusFilter">
+        <option value="all">All Statuses</option>
+        <option value="npa">NPA</option>
+        <option value="pnpa">PNPA</option>
+        <option value="sma">SMA</option>
+        <option value="watch">Watch</option>
+        <option value="recovered">Recovered</option>
+      </select>
+      <select id="legalFilter">
+        <option value="all">All Legal</option>
+        <option value="none">None</option>
+        <option value="section138">Section 138</option>
+        <option value="sarfaesi">SARFAESI</option>
+        <option value="drt">DRT</option>
+      </select>
+      <select id="sortBy">
+        <option value="recent">Recently Added</option>
+        <option value="amount_desc">Amount (High → Low)</option>
+        <option value="amount_asc">Amount (Low → High)</option>
+      </select>
+      <div class="spacer"></div>
+      <div class="muted small">Total records: <span id="totalCount">0</span></div>
+    </div>
+
+    <table aria-label="NPA table">
+      <thead>
+        <tr>
+          <th>Account No</th>
+          <th>Borrower</th>
+          <th>Amount</th>
+          <th>Sanction Date</th>
+          <th>Status</th>
+          <th>Legal</th>
+          <th>Legal Details</th>
+          <th>Actions</th>
+          <th>Follow-ups</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </section>
+
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="modalBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal card">
+    <h3 id="modalTitle">Add / Edit Account</h3>
+    <form id="npaForm">
+      <div class="row">
+        <div class="col">
+          <label>Account No</label>
+          <input id="accNo" name="accNo" type="text" required autocomplete="off" />
+        </div>
+        <div class="col">
+          <label>Borrower Name</label>
+          <input id="borrower" name="borrower" type="text" required />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <div class="col">
+          <label>Outstanding Amount (₹)</label>
+          <input id="amount" name="amount" type="number" min="0" step="0.01" required />
+        </div>
+        <div class="col">
+          <label>Sanction / Default Date</label>
+          <input id="date" name="date" type="date" />
+        </div>
+      </div>
+
+      <div style="margin-top:8px">
+        <label>Status</label>
+        <select id="status" required>
+          <option value="npa">NPA</option>
+          <option value="pnpa">PNPA</option>
+          <option value="sma">SMA</option>
+          <option value="watch">Watch</option>
+          <option value="recovered">Recovered</option>
+        </select>
+      </div>
+
+      <div style="margin-top:8px">
+        <label>General Legal Status</label>
+        <select id="legalStatus">
+          <option value="none">None</option>
+          <option value="section138">Section 138</option>
+          <option value="sarfaesi">SARFAESI</option>
+          <option value="drt">DRT</option>
+        </select>
+      </div>
+
+      <hr style="margin:12px 0" />
+      <h4 style="margin:6px 0">Section 138</h4>
+      <div class="row">
+        <div class="col">
+          <label>Action</label>
+          <select id="sec138_action">
+            <option value="none">None</option>
+            <option value="filed">Filed</option>
+            <option value="notice_sent">Notice Sent</option>
+            <option value="pending">Pending</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Next Hearing Date</label>
+          <input id="sec138_next_date" type="date" />
+        </div>
+        <div class="col">
+          <label>Advocate Name</label>
+          <input id="sec138_advocate" type="text" />
+        </div>
+      </div>
+
+      <hr style="margin:12px 0" />
+      <h4 style="margin:6px 0">DRT</h4>
+      <div class="row">
+        <div class="col">
+          <label>Action</label>
+          <select id="drt_action">
+            <option value="none">None</option>
+            <option value="filed">Filed</option>
+            <option value="notice_sent">Notice Sent</option>
+            <option value="pending">Pending</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Next Hearing Date (DRT)</label>
+          <input id="drt_next_date" type="date" />
+        </div>
+        <div class="col">
+          <label>Advocate Name (DRT)</label>
+          <input id="drt_advocate" type="text" />
+        </div>
+      </div>
+
+      <hr style="margin:12px 0" />
+      <h4 style="margin:6px 0">SARFAESI (Sec 13)</h4>
+      <div class="row">
+        <div class="col">
+          <label>Action</label>
+          <select id="sarfaesi_action">
+            <option value="none">None</option>
+            <option value="notice_issued">Notice Issued</option>
+            <option value="section13_2">13(2) Issued</option>
+            <option value="section13_4">13(4) Issued</option>
+            <option value="possession_sought">Physical Possession Sought</option>
+            <option value="possession_taken">Possession Taken</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Date of 13(2)</label>
+          <input id="sarfaesi_13_2_date" type="date" />
+        </div>
+        <div class="col">
+          <label>Date of 13(4)</label>
+          <input id="sarfaesi_13_4_date" type="date" />
+        </div>
+      </div>
+
+      <div style="margin-top:8px">
+        <label>Date of Physical Possession</label>
+        <input id="sarfaesi_phys_poss_date" type="date" />
+      </div>
+
+      <div style="margin-top:8px">
+        <label>Possession Officer / Remark</label>
+        <input id="sarfaesi_poss_remark" type="text" />
+      </div>
+
+      <div style="margin-top:8px">
+        <label>Notes</label>
+        <textarea id="notes"></textarea>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button type="button" id="cancelBtn" class="ghost">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Follow-up modal -->
+<div id="followupBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="followupTitle">
+    <h3 id="followupTitle">Manage Recovery Follow-ups</h3>
+    <div id="followupHeader" class="tiny muted" style="margin-bottom:8px"></div>
+
+    <form id="followupForm" style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+      <div style="min-width:160px">
+        <label>Date</label>
+        <input id="followupDate" type="date" required />
+      </div>
+      <div style="flex:1;min-width:220px">
+        <label>Type</label>
+        <select id="followupType">
+          <option value="recovery">Recovery</option>
+          <option value="hearing">Hearing</option>
+          <option value="visit">Visit</option>
+          <option value="call">Call</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div style="flex:2;min-width:240px">
+        <label>Remark</label>
+        <input id="followupNote" type="text" placeholder="Remark (optional)" />
+      </div>
+      <div style="width:140px">
+        <button id="addFollowupBtn" type="submit">Add</button>
+      </div>
+    </form>
+
+    <hr/>
+
+    <div id="followupList" style="margin-top:8px;max-height:40vh;overflow:auto"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button id="closeFollowup" class="ghost">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  // ---------- Simple client-side auth (demo) ----------
+  const USERS = [{ username:'admin', password:'admin123', displayName:'Administrator' }];
+  const SESSION_KEY = 'npa_export_auth_session_v1';
+
+  // ---------- Data storage ----------
+  const STORAGE_KEY = 'npa_export_legal_with_auth_followups_v1';
+  const EMBEDDED = [
+    {
+      id:1,
+      accNo:"84029800001037",
+      borrower:"Rachpal Singh",
+      amount:1200000,
+      date:"2021-09-24",
+      status:"npa",
+      legalStatus:"section138",
+      legalDetails:{ section138:{action:"filed",nextDate:"2025-12-20",advocate:"Adv. Singh"}, drt:{action:"none",nextDate:"",advocate:""}, sarfaesi:{action:"none",date13_2:"",date13_4:"",physPossDate:"",possRemark:""} },
+      notes:"Legal notice sent.",
+      followups:[ { date:"2025-11-01", type:"recovery", note:"Initial recovery call" } ]
+    }
+  ];
+
+  // elements
+  const loginBackdrop = document.getElementById('loginBackdrop');
+  const loginForm = document.getElementById('loginForm');
+  const loginUser = document.getElementById('loginUser');
+  const loginPass = document.getElementById('loginPass');
+
+  const mainApp = document.getElementById('mainApp');
+  const userInfo = document.getElementById('userInfo');
+  const profileArea = document.getElementById('profileArea');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  const dashTotal = document.getElementById('dashTotal');
+  const dashNpa = document.getElementById('dashNpa');
+  const dashFollow = document.getElementById('dashFollow');
+
+  const addBtn = document.getElementById('addBtn');
+  const importBtn = document.getElementById('importBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const fileInput = document.getElementById('fileInput');
+
+  const searchBox = document.getElementById('searchBox');
+  const statusFilter = document.getElementById('statusFilter');
+  const legalFilter = document.getElementById('legalFilter');
+  const sortBy = document.getElementById('sortBy');
+
+  const tableBody = document.getElementById('tableBody');
+  const totalCount = document.getElementById('totalCount');
+
+  const modalBackdrop = document.getElementById('modalBackdrop');
+  const npaForm = document.getElementById('npaForm');
+  const modalTitle = document.getElementById('modalTitle');
+  const cancelBtn = document.getElementById('cancelBtn');
+
+  // form fields
+  const accNoEl = document.getElementById('accNo');
+  const borrowerEl = document.getElementById('borrower');
+  const amountEl = document.getElementById('amount');
+  const dateEl = document.getElementById('date');
+  const statusEl = document.getElementById('status');
+  const legalStatusEl = document.getElementById('legalStatus');
+
+  const sec138_action = document.getElementById('sec138_action');
+  const sec138_next_date = document.getElementById('sec138_next_date');
+  const sec138_advocate = document.getElementById('sec138_advocate');
+
+  const drt_action = document.getElementById('drt_action');
+  const drt_next_date = document.getElementById('drt_next_date');
+  const drt_advocate = document.getElementById('drt_advocate');
+
+  const sarfaesi_action = document.getElementById('sarfaesi_action');
+  const sarfaesi_13_2_date = document.getElementById('sarfaesi_13_2_date');
+  const sarfaesi_13_4_date = document.getElementById('sarfaesi_13_4_date');
+  const sarfaesi_phys_poss_date = document.getElementById('sarfaesi_phys_poss_date');
+  const sarfaesi_poss_remark = document.getElementById('sarfaesi_poss_remark');
+
+  const notesEl = document.getElementById('notes');
+
+  // followup modal elements
+  const followupBackdrop = document.getElementById('followupBackdrop');
+  const followupTitle = document.getElementById('followupTitle');
+  const followupHeader = document.getElementById('followupHeader');
+  const followupForm = document.getElementById('followupForm');
+  const followupDate = document.getElementById('followupDate');
+  const followupType = document.getElementById('followupType');
+  const followupNote = document.getElementById('followupNote');
+  const followupList = document.getElementById('followupList');
+  const closeFollowup = document.getElementById('closeFollowup');
+
+  // data
+  function loadData(){ try{ const raw = localStorage.getItem(STORAGE_KEY); if(raw) return JSON.parse(raw); }catch(e){console.warn(e);} try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(EMBEDDED)); }catch(e){} return JSON.parse(JSON.stringify(EMBEDDED)); }
+  function saveData(d){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }catch(e){console.warn(e);} }
+  let data = loadData();
+  let editingId = null;
+  let activeFollowAccountId = null;
+
+  // session helpers
+  function setSession(user){ try{ sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username:user.username, displayName:user.displayName })); }catch(e){} }
+  function clearSession(){ try{ sessionStorage.removeItem(SESSION_KEY); }catch(e){} }
+  function getSession(){ try{ const raw = sessionStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; }catch(e){return null;} }
+
+  // auth UI
+  function showAppForUser(session){
+    loginBackdrop.style.display = 'none';
+    mainApp.style.display = 'grid';
+    userInfo.textContent = session.displayName + ' (' + session.username + ')';
+    profileArea.textContent = 'Signed in';
+    renderTable();
+    updateDashboard();
+  }
+  function hideApp(){ mainApp.style.display = 'none'; loginBackdrop.style.display = 'flex'; }
+
+  // check existing session
+  const existing = getSession();
+  if (existing){ showAppForUser(existing); } else { hideApp(); }
+
+  // login handler
+  loginForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    const u = loginUser.value.trim();
+    const p = loginPass.value;
+    const user = USERS.find(x=>x.username===u && x.password===p);
+    if (!user){ alert('Invalid username or password'); return; }
+    setSession(user);
+    showAppForUser({ username:user.username, displayName:user.displayName });
+    loginForm.reset();
+  });
+
+  logoutBtn.addEventListener('click', function(){
+    if (!confirm('Logout?')) return;
+    clearSession();
+    hideApp();
+  });
+
+  // render helpers
+  function formatINR(v){ return '₹' + Number(v||0).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
+  function escapeHtml(s){ if (s==null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function renderStatusTag(s){
+    if (s==='npa') return '<span class="small-btn" style="background:rgba(239,68,68,0.08);color:#ef4444">NPA</span>';
+    if (s==='pnpa') return '<span class="small-btn" style="background:rgba(59,130,246,0.08);color:#2563eb">PNPA</span>';
+    if (s==='sma') return '<span class="small-btn" style="background:rgba(245,158,11,0.08);color:#f59e0b">SMA</span>';
+    if (s==='watch') return '<span class="small-btn" style="background:rgba(245,158,11,0.08);color:#f59e0b">Watch</span>';
+    if (s==='recovered') return '<span class="small-btn" style="background:rgba(16,185,129,0.08);color:#10b981">Recovered</span>';
+    return '<span class="small muted">-</span>';
+  }
+
+  function renderLegalTag(s){
+    if (!s|| s==='none') return '<span class="small muted">-</span>';
+    if (s==='section138') return '<span class="small-btn" style="background:rgba(15,111,255,0.08);color:#0f6fff">Section 138</span>';
+    if (s==='sarfaesi') return '<span class="small-btn" style="background:rgba(15,111,255,0.08);color:#0f6fff">SARFAESI</span>';
+    if (s==='drt') return '<span class="small-btn" style="background:rgba(15,111,255,0.08);color:#0f6fff">DRT</span>';
+    return escapeHtml(s);
+  }
+
+  function renderLegalDetails(details){
+    if (!details) return '-';
+    const parts=[];
+    if (details.section138 && details.section138.action && details.section138.action!=='none'){
+      parts.push('138:'+details.section138.action+(details.section138.nextDate?(' on '+details.section138.nextDate):'')+(details.section138.advocate?(' ('+details.section138.advocate+')'):'')); }
+    if (details.drt && details.drt.action && details.drt.action!=='none'){
+      parts.push('DRT:'+details.drt.action+(details.drt.nextDate?(' on '+details.drt.nextDate):'')+(details.drt.advocate?(' ('+details.drt.advocate+')'):'')); }
+    if (details.sarfaesi && details.sarfaesi.action && details.sarfaesi.action!=='none'){
+      const s = details.sarfaesi;
+      parts.push('SARFAESI:'+s.action+(s.date13_2?(' 13(2):'+s.date13_2):'')+(s.date13_4?(' 13(4):'+s.date13_4):'')+(s.physPossDate?(' Poss:'+s.physPossDate):'')+(s.possRemark?(' ('+s.possRemark+')'):'')); }
+    return parts.length?parts.join(' | '):'-';
+  }
+
+  function followupCountFor(row){ return (row.followups && row.followups.length) ? row.followups.length : 0; }
+
+  function buildFollowupCell(row){
+    const count = followupCountFor(row);
+    return `<div style="display:flex;gap:8px;align-items:center"><div class="follow-count">${count} follow</div><button class="small-btn" data-action="manageFollow" data-id="${row.id}">Manage</button></div>`;
+  }
+
+  function updateDashboard(){
+    const total = data.reduce((s,r)=>s+Number(r.amount||0),0);
+    const npaCount = data.filter(d=>d.status==='npa').length;
+    const followups = data.reduce((s,r)=> s + (r.followups ? r.followups.length : 0), 0);
+    dashTotal.textContent = formatINR(total);
+    dashNpa.textContent = npaCount;
+    dashFollow.textContent = followups;
+  }
+
+  function renderTable(){
+    const q = (searchBox.value||'').trim().toLowerCase();
+    const status = statusFilter.value;
+    const legal = legalFilter.value;
+    const sort = sortBy.value;
+    let filtered = data.filter(d=>{
+      if (status !== 'all' && d.status !== status) return false;
+      if (legal !== 'all'){
+        if (legal === 'none'){ if (d.legalStatus && d.legalStatus !== 'none') return false; }
+        else { if (d.legalStatus !== legal) return false; }
+      }
+      if (!q) return true;
+      return (d.borrower||'').toLowerCase().includes(q) || (d.accNo||'').toLowerCase().includes(q) || (d.notes||'').toLowerCase().includes(q);
+    });
+
+    if (sort === 'amount_desc') filtered.sort((a,b)=>b.amount - a.amount);
+    else if (sort === 'amount_asc') filtered.sort((a,b)=>a.amount - b.amount);
+    else filtered.sort((a,b)=>b.id - a.id);
+
+    tableBody.innerHTML = '';
+    filtered.forEach(row=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(row.accNo)}</td>
+        <td><div style="font-weight:600">${escapeHtml(row.borrower)}</div><div class="small muted">${escapeHtml((row.notes||'').substring(0,80))}</div></td>
+        <td>${formatINR(row.amount)}</td>
+        <td>${row.date || '-'}</td>
+        <td>${renderStatusTag(row.status)}</td>
+        <td>${renderLegalTag(row.legalStatus)}</td>
+        <td>${escapeHtml(renderLegalDetails(row.legalDetails))}</td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="ghost" data-action="view" data-id="${row.id}">View</button>
+            <button class="ghost" data-action="edit" data-id="${row.id}">Edit</button>
+            <button class="ghost" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+        <td>${buildFollowupCell(row)}</td>
+      `;
+      tableBody.appendChild(tr);
+    });
+    totalCount.textContent = filtered.length;
+    updateDashboard();
+  }
+
+  // Modal open/close for Add/Edit
+  function openModal(mode='add', row){
+    editingId = null;
+    modalTitle.textContent = mode === 'add' ? 'Add Account' : 'Edit Account';
+    if (mode === 'edit' && row){
+      editingId = row.id;
+      accNoEl.value = row.accNo || '';
+      borrowerEl.value = row.borrower || '';
+      amountEl.value = row.amount || '';
+      dateEl.value = row.date || '';
+      statusEl.value = row.status || 'npa';
+      legalStatusEl.value = row.legalStatus || 'none';
+      const ld = row.legalDetails || {}; const s = ld.section138 || {}; const d = ld.drt || {}; const sar = ld.sarfaesi || {};
+      sec138_action.value = s.action || 'none'; sec138_next_date.value = s.nextDate || ''; sec138_advocate.value = s.advocate || '';
+      drt_action.value = d.action || 'none'; drt_next_date.value = d.nextDate || ''; drt_advocate.value = d.advocate || '';
+      sarfaesi_action.value = sar.action || 'none'; sarfaesi_13_2_date.value = sar.date13_2 || ''; sarfaesi_13_4_date.value = sar.date13_4 || '';
+      sarfaesi_phys_poss_date.value = sar.physPossDate || ''; sarfaesi_poss_remark.value = sar.possRemark || '';
+      notesEl.value = row.notes || '';
+    } else {
+      editingId = null;
+      npaForm.reset();
+      statusEl.value = 'npa';
+      legalStatusEl.value = 'none';
+    }
+    modalBackdrop.style.display = 'flex';
+    setTimeout(()=> accNoEl.focus(), 120);
+  }
+  function closeModal(){ modalBackdrop.style.display = 'none'; editingId = null; }
+
+  addBtn.addEventListener('click', ()=> openModal('add'));
+  cancelBtn.addEventListener('click', closeModal);
+  modalBackdrop.addEventListener('click', (e)=>{ if (e.target === modalBackdrop) closeModal(); });
+
+  // Save account
+  npaForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    const obj = {
+      accNo: (accNoEl.value||'').trim(),
+      borrower: (borrowerEl.value||'').trim(),
+      amount: parseFloat(amountEl.value) || 0,
+      date: dateEl.value || '',
+      status: statusEl.value || 'npa',
+      legalStatus: legalStatusEl.value || 'none',
+      legalDetails: {
+        section138: { action: sec138_action.value || 'none', nextDate: sec138_next_date.value || '', advocate: sec138_advocate.value || '' },
+        drt: { action: drt_action.value || 'none', nextDate: drt_next_date.value || '', advocate: drt_advocate.value || '' },
+        sarfaesi: { action: sarfaesi_action.value || 'none', date13_2: sarfaesi_13_2_date.value || '', date13_4: sarfaesi_13_4_date.value || '', physPossDate: sarfaesi_phys_poss_date.value || '', possRemark: sarfaesi_poss_remark.value || '' }
+      },
+      notes: (notesEl.value||'').trim(),
+      followups: (function(){ if (editingId){ const existing = data.find(d=>d.id===editingId); return existing && existing.followups ? existing.followups : []; } return []; })()
+    };
+    if (!obj.accNo || !obj.borrower){ alert('Account number and borrower are required'); return; }
+    if (editingId){
+      const idx = data.findIndex(d=>d.id === editingId);
+      if (idx >= 0){ data[idx] = Object.assign({ id: editingId }, obj); saveData(data); renderTable(); closeModal(); alert('Record updated.'); return; }
+    }
+    const id = data.length ? Math.max(...data.map(d=>d.id)) + 1 : 1;
+    data.push(Object.assign({ id }, obj));
+    saveData(data); renderTable(); closeModal(); alert('Record added.');
+  });
+
+  // Table actions & followup manage
+  tableBody.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button'); if (!btn) return;
+    const action = btn.dataset.action; const id = Number(btn.dataset.id);
+    if (action === 'manageFollow'){
+      openFollowupModal(Number(btn.dataset.id));
+      return;
+    }
+    const row = data.find(d=>d.id === id);
+    if (!row) return;
+    if (action === 'view'){
+      const ld = row.legalDetails || {};
+      alert(
+        'Borrower: ' + row.borrower + '\n' +
+        'Account: ' + row.accNo + '\n' +
+        'Amount: ' + formatINR(row.amount) + '\n' +
+        'Status: ' + row.status + '\n\n' +
+        '--- Section 138 ---\n' +
+        'Action: ' + (ld.section138?ld.section138.action:'-') + '\n' +
+        'Next Hearing: ' + (ld.section138?ld.section138.nextDate:'-') + '\n' +
+        'Advocate: ' + (ld.section138?ld.section138.advocate:'-') + '\n\n' +
+        '--- DRT ---\n' +
+        'Action: ' + (ld.drt?ld.drt.action:'-') + '\n' +
+        'Next Hearing: ' + (ld.drt?ld.drt.nextDate:'-') + '\n' +
+        'Advocate: ' + (ld.drt?ld.drt.advocate:'-') + '\n\n' +
+        '--- SARFAESI ---\n' +
+        'Action: ' + (ld.sarfaesi?ld.sarfaesi.action:'-') + '\n' +
+        '13(2) Date: ' + (ld.sarfaesi?ld.sarfaesi.date13_2:'-') + '\n' +
+        '13(4) Date: ' + (ld.sarfaesi?ld.sarfaesi.date13_4:'-') + '\n' +
+        'Physical Possession Date: ' + (ld.sarfaesi?ld.sarfaesi.physPossDate:'-') + '\n' +
+        'Possession Remark: ' + (ld.sarfaesi?ld.sarfaesi.possRemark:'-') + '\n\n' +
+        'Notes: ' + (row.notes||'')
+      );
+    } else if (action === 'edit'){
+      openModal('edit', row);
+    } else if (action === 'delete'){
+      if (!confirm('Delete this record?')) return;
+      data = data.filter(d=>d.id !== id);
+      saveData(data); renderTable();
+    }
+  });
+
+  // Follow-up modal functions
+  function openFollowupModal(accountId){
+    activeFollowAccountId = accountId;
+    const row = data.find(d=>d.id === accountId);
+    if (!row) return;
+    followupTitle.textContent = `Follow-ups — ${row.accNo} • ${row.borrower}`;
+    followupHeader.textContent = `Account: ${row.accNo} — Borrower: ${row.borrower}`;
+    renderFollowupList(row);
+    followupBackdrop.style.display = 'flex';
+  }
+  function closeFollowupModal(){ activeFollowAccountId = null; followupBackdrop.style.display = 'none'; followupForm.reset(); }
+
+  function renderFollowupList(row){
+    const list = row.followups && row.followups.length ? row.followups.slice().sort((a,b)=>b.date.localeCompare(a.date)) : [];
+    if (!list.length){
+      followupList.innerHTML = '<div class="tiny muted">No follow-ups yet. Add one using the form above.</div>';
+      return;
+    }
+    followupList.innerHTML = '';
+    list.forEach((f, idx)=>{
+      const div = document.createElement('div');
+      div.className = 'follow-item';
+      div.innerHTML = `<div><strong>${escapeHtml(f.date)}</strong> — <span class="small muted">${escapeHtml(f.type)}</span><div class="small muted">${escapeHtml(f.note||'')}</div></div><div style="display:flex;gap:6px"><button class="small-btn" data-action="editFollowItem" data-idx="${idx}" data-id="${row.id}">Edit</button><button class="small-btn" data-action="delFollowItem" data-idx="${idx}" data-id="${row.id}">Delete</button></div>`;
+      followupList.appendChild(div);
+    });
+  }
+
+  followupForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    if (!activeFollowAccountId) return alert('No account selected');
+    const date = followupDate.value;
+    const type = followupType.value;
+    const note = followupNote.value.trim();
+    if (!date) return alert('Select a date');
+    const idx = data.findIndex(d=>d.id === activeFollowAccountId);
+    if (idx < 0) return alert('Account not found');
+    if (!data[idx].followups) data[idx].followups = [];
+    data[idx].followups.push({ date: date, type: type, note: note });
+    saveData(data); renderTable(); renderFollowupList(data[idx]);
+    followupForm.reset(); followupDate.focus();
+  });
+
+  followupList.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button'); if (!btn) return;
+    const action = btn.dataset.action; const id = Number(btn.dataset.id); const idx = Number(btn.dataset.idx);
+    const account = data.find(d=>d.id === id);
+    if (!account) return;
+    if (action === 'delFollowItem'){
+      if (!confirm('Delete this follow-up?')) return;
+      account.followups.splice(idx,1);
+      saveData(data); renderTable(); renderFollowupList(account);
+    } else if (action === 'editFollowItem'){
+      const item = account.followups[idx];
+      if (!item) return;
+      followupDate.value = item.date;
+      followupType.value = item.type || 'recovery';
+      followupNote.value = item.note || '';
+      account.followups.splice(idx,1);
+      saveData(data); renderTable(); renderFollowupList(account);
+      followupDate.focus();
+    }
+  });
+
+  closeFollowup.addEventListener('click', closeFollowupModal);
+  followupBackdrop.addEventListener('click',(e)=>{ if (e.target === followupBackdrop) closeFollowupModal(); });
+
+  // Export CSV (includes detailed legal fields + FollowupsJSON)
+  exportBtn.addEventListener('click', ()=>{
+    try {
+      if (!data.length) return alert('No records to export');
+      const headers = [
+        'Account No','Borrower','Amount','Date','Status','LegalStatus',
+        'Sec138Action','Sec138NextDate','Sec138Advocate',
+        'DRTAction','DRTNextDate','DRTAdvocate',
+        'SARAction','SAR13_2_Date','SAR13_4_Date','SAR_PhysicalPoss_Date','SAR_Pos_Remark',
+        'FollowupsJSON','Notes'
+      ];
+      const rows = data.map(d=>{
+        const ld = d.legalDetails || {};
+        const s = ld.section138 || {};
+        const drt = ld.drt || {};
+        const sar = ld.sarfaesi || {};
+        const followJson = d.followups ? JSON.stringify(d.followups) : '';
+        const cells = [
+          escapeCsv(d.accNo||''), escapeCsv(d.borrower||''), (d.amount != null ? d.amount : ''), d.date || '', d.status || '', d.legalStatus || '',
+          escapeCsv(s.action||''), s.nextDate || '', escapeCsv(s.advocate||''),
+          escapeCsv(drt.action||''), drt.nextDate || '', escapeCsv(drt.advocate||''),
+          escapeCsv(sar.action||''), sar.date13_2 || '', sar.date13_4 || '', sar.physPossDate || '', escapeCsv(sar.possRemark||''),
+          escapeCsv(followJson), escapeCsv(d.notes||'')
+        ];
+        return cells.join(',');
+      });
+      const csv = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'npa_export_with_legal_and_followups.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch(err){ console.error(err); alert('Export failed: '+(err && err.message?err.message:err)); }
+  });
+
+  // Import CSV
+  importBtn.addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', async (ev)=>{
+    const f = ev.target.files[0]; if (!f) return; const text = await f.text(); parseCSV(text); ev.target.value = '';
+  });
+
+  function parseCSV(text){
+    const rows = text.split(/\r?\n/).filter(r=>r.trim() !== '');
+    if (!rows.length) return alert('Empty file');
+    const headers = rows[0].split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(h=>h.replace(/^"|"$/g,'').trim());
+    const required = ['Account No','Borrower','Amount'];
+    for (const r of required) if (!headers.includes(r)) return alert('CSV must include headers: Account No, Borrower, Amount');
+    const newRows = [];
+    for (let i=1;i<rows.length;i++){
+      const cols = rows[i].split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c=>c.replace(/^"|"$/g,'').trim());
+      if (cols.length === 1 && cols[0] === '') continue;
+      const obj = {}; headers.forEach((h, idx)=> obj[h] = cols[idx] || '');
+      const entry = {
+        id: data.length ? Math.max(...data.map(d=>d.id)) + newRows.length + 1 : newRows.length + 1,
+        accNo: obj['Account No'] || '',
+        borrower: obj['Borrower'] || '',
+        amount: parseFloat(obj['Amount']) || 0,
+        date: obj['Date'] || '',
+        status: (obj['Status'] || 'npa').toLowerCase(),
+        legalStatus: obj['LegalStatus'] || obj['Legal Status'] || 'none',
+        legalDetails: {
+          section138: {
+            action: obj['Sec138Action'] || '',
+            nextDate: obj['Sec138NextDate'] || '',
+            advocate: obj['Sec138Advocate'] || ''
+          },
+          drt: {
+            action: obj['DRTAction'] || '',
+            nextDate: obj['DRTNextDate'] || '',
+            advocate: obj['DRTAdvocate'] || ''
+          },
+          sarfaesi: {
+            action: obj['SARAction'] || '',
+            date13_2: obj['SAR13_2_Date'] || '',
+            date13_4: obj['SAR13_4_Date'] || '',
+            physPossDate: obj['SAR_PhysicalPoss_Date'] || '',
+            possRemark: obj['SAR_Pos_Remark'] || ''
+          }
+        },
+        followups: [],
+        notes: obj['Notes'] || ''
+      };
+      if (obj['FollowupsJSON']){ try{ entry.followups = JSON.parse(obj['FollowupsJSON']); }catch(e){ entry.followups = []; } }
+      newRows.push(entry);
+    }
+    if (!newRows.length) return alert('No valid rows found');
+    data = data.concat(newRows); saveData(data); renderTable(); alert(newRows.length + ' records imported');
+  }
+
+  // Reset snapshot
+  resetBtn.addEventListener('click', ()=>{ if (!confirm('This will overwrite current data with embedded snapshot. Proceed?')) return; try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(EMBEDDED)); data = JSON.parse(JSON.stringify(EMBEDDED)); renderTable(); alert('Reset done.'); }catch(e){ alert('Reset failed: '+e.message); } });
+
+  // Helpers
+  function escapeCsv(v){ if (v==null) return ''; const s = String(v); if (s.includes(',')||s.includes('"')||s.includes('\n')) return '"' + s.replace(/"/g,'""') + '"'; return s; }
+
+  // Filters and initial render
+  [searchBox, statusFilter, legalFilter, sortBy].forEach(el => el.addEventListener('input', renderTable));
+  window.addEventListener('keydown', (e)=>{ if (e.key && e.key.toLowerCase()==='n' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA'){ e.preventDefault(); openModal('add'); } });
+
+  // initial render if logged in
+  if (getSession()){ renderTable(); updateDashboard(); }
+
+  console.log('NPA export+auth+followups app ready.');
+
+})();
+</script>
+
+</body>
+</html>
